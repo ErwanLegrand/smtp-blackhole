@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"flag"
 	"bytes"
+	"time"
 )
 
 type handler struct {
 	s string
-	f func(net.Conn, []byte)
+	f func(net.Conn, []byte, time.Duration)
 }
 
 var responses = map[string] handler {
@@ -23,7 +24,7 @@ var responses = map[string] handler {
 	"RSET": {"250 OK\r\n", nil},
 	"QUIT": {"221 Goodbye\r\n", nil} }
 
-func handleConnection(c net.Conn) {
+func handleConnection(c net.Conn, latency time.Duration) {
 	// Print banner
 	c.Write([]byte("220 Welcome to Blackhole SMTP!\r\n"))
 	readBuf := make([]byte, 1024)
@@ -33,36 +34,42 @@ func handleConnection(c net.Conn) {
 			_ = c.Close()
 			return
 		}
+		time.Sleep(latency * time.Millisecond)
 		h, ok := responses[string(readBuf[0:4])]
 		if ok {
 			c.Write([]byte(h.s))
 			if h.f != nil {
-				h.f(c, readBuf)
+				h.f(c, readBuf, latency)
 			}
+		} else {
+			c.Write([]byte("500 Command unrecognized\r\n"))
 		}
 	}
 }
 
-func handleData(c net.Conn, b[]byte) {
+func handleData(c net.Conn, b[]byte, latency time.Duration) {
 	for {
 		l, e := c.Read(b)
 		if e != nil || l == 0 {
 			break;
 		}
 		if bytes.Contains(b, []byte("\r\n.\r\n")) {
+			time.Sleep(latency * time.Millisecond)
 			c.Write([]byte("250 OK\r\n"))
 			break;
 		}
 	}
 }
 
-func handleBdat(c net.Conn, b[]byte) {
+func handleBdat(c net.Conn, b[]byte, latency time.Duration) {
 }
 
 func main() {
 	var port int
+	var latency int
 
 	flag.IntVar(&port, "port", 25, "TCP port")
+	flag.IntVar(&latency, "latency", 0, "Latency in milliseconds")
 
 	flag.Parse()
 
@@ -88,6 +95,6 @@ func main() {
 		if e != nil {
 			continue
 		}
-		go handleConnection(c)
+		go handleConnection(c, time.Duration(latency))
 	}
 }
