@@ -30,6 +30,7 @@ func handleConnection(c net.Conn) {
 	for {
 		_, e := c.Read(readBuf)
 		if e != nil {
+			_ = c.Close()
 			return
 		}
 		h, ok := responses[string(readBuf[0:4])]
