@@ -1,11 +1,11 @@
 package main
 
 import (
-	"net"
-	"log"
-	"fmt"
-	"flag"
 	"bytes"
+	"flag"
+	"fmt"
+	"log"
+	"net"
 	"time"
 )
 
@@ -14,15 +14,15 @@ type handler struct {
 	f func(net.Conn, []byte, time.Duration)
 }
 
-var responses = map[string] handler {
+var responses = map[string]handler{
 	"EHLO": {"250-Pleased to meet you!\r\n250-PIPELINING\r\n250 CHUNKING\r\n", nil},
 	"HELO": {"250 Pleased to meet you!\r\n", nil},
 	"MAIL": {"250 OK\r\n", nil},
 	"RCPT": {"250 OK\r\n", nil},
 	"DATA": {"354 End data with <CR><LF>.<CR><LF>\r\n", handleData}, // Need to read data until \r\n.\r\n is received.
-	"BDAT": {"250 OK\r\n", handleBdat}, // Should be sent once the data has been reveived
+	"BDAT": {"250 OK\r\n", handleBdat},                              // Should be sent once the data has been reveived
 	"RSET": {"250 OK\r\n", nil},
-	"QUIT": {"221 Goodbye\r\n", nil} }
+	"QUIT": {"221 Goodbye\r\n", nil}}
 
 func handleConnection(c net.Conn, latency time.Duration) {
 	// Print banner
@@ -47,21 +47,21 @@ func handleConnection(c net.Conn, latency time.Duration) {
 	}
 }
 
-func handleData(c net.Conn, b[]byte, latency time.Duration) {
+func handleData(c net.Conn, b []byte, latency time.Duration) {
 	for {
 		l, e := c.Read(b)
 		if e != nil || l == 0 {
-			break;
+			break
 		}
 		if bytes.Contains(b, []byte("\r\n.\r\n")) {
 			time.Sleep(latency * time.Millisecond)
 			c.Write([]byte("250 OK\r\n"))
-			break;
+			break
 		}
 	}
 }
 
-func handleBdat(c net.Conn, b[]byte, latency time.Duration) {
+func handleBdat(c net.Conn, b []byte, latency time.Duration) {
 }
 
 func main() {
@@ -78,7 +78,7 @@ func main() {
 	if e != nil {
 		// Error!
 		log.Panic(e)
-		return;
+		return
 	}
 
 	// Start listening for incoming connections
@@ -86,7 +86,7 @@ func main() {
 	if e != nil {
 		// Error!
 		log.Panic(e)
-		return;
+		return
 	}
 
 	// Accept connections then handle each one in a dedicated goroutine
