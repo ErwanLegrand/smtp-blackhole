@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -24,22 +25,28 @@ var responses = map[string]handler{
 	"RSET": {"250 OK\r\n", nil},
 	"QUIT": {"221 Goodbye\r\n", nil}}
 
-func handleConnection(c net.Conn, latency time.Duration) {
+func handleConnection(c net.Conn, latency time.Duration, verbose bool) {
 	// Print banner
 	c.Write([]byte("220 Welcome to Blackhole SMTP!\r\n"))
-	readBuf := make([]byte, 1024)
 	for {
-		_, e := c.Read(readBuf)
+		readBuf := make([]byte, 1024)
+		l, e := c.Read(readBuf)
 		if e != nil {
 			_ = c.Close()
 			return
 		}
 		time.Sleep(latency * time.Millisecond)
+		if verbose {
+			log.Printf("-> [%s]", strings.Trim(string(readBuf[0:l]), "\r\n "))
+		}
 		h, ok := responses[string(readBuf[0:4])]
 		if ok {
 			c.Write([]byte(h.s))
 			if h.f != nil {
 				h.f(c, readBuf, latency)
+			}
+			if verbose {
+				log.Printf("<- %s", h.s)
 			}
 		} else {
 			c.Write([]byte("500 Command unrecognized\r\n"))
@@ -67,9 +74,11 @@ func handleBdat(c net.Conn, b []byte, latency time.Duration) {
 func main() {
 	var port int
 	var latency int
+	var verbose bool
 
 	flag.IntVar(&port, "port", 25, "TCP port")
 	flag.IntVar(&latency, "latency", 0, "Latency in milliseconds")
+	flag.BoolVar(&verbose, "verbose", false, "Show the SMTP traffic")
 
 	flag.Parse()
 
@@ -95,6 +104,6 @@ func main() {
 		if e != nil {
 			continue
 		}
-		go handleConnection(c, time.Duration(latency))
+		go handleConnection(c, time.Duration(latency), verbose)
 	}
 }
