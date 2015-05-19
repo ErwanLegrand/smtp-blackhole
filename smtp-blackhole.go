@@ -28,10 +28,10 @@ var responses = map[string]handler{
 	"QUIT": {"221 Goodbye\r\n", nil}}
 
 func sendResponse(c net.Conn, s string, verbose bool) {
-			c.Write([]byte(s))
-			if verbose {
-				log.Printf("<- %s", s)
-			}
+	c.Write([]byte(s))
+	if verbose {
+		log.Printf("<- %s", s)
+	}
 }
 
 func handleConnection(c net.Conn, latency time.Duration, verbose bool) {
