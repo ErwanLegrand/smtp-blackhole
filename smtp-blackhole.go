@@ -12,8 +12,10 @@ import (
 
 type handler struct {
 	s string
-	f func(net.Conn, []byte, time.Duration)
+	f func(net.Conn, []byte, time.Duration, bool)
 }
+
+var verbose bool
 
 var responses = map[string]handler{
 	"EHLO": {"250-Pleased to meet you!\r\n250-PIPELINING\r\n250 CHUNKING\r\n", nil},
@@ -25,11 +27,18 @@ var responses = map[string]handler{
 	"RSET": {"250 OK\r\n", nil},
 	"QUIT": {"221 Goodbye\r\n", nil}}
 
+func sendResponse(c net.Conn, s string, verbose bool) {
+			c.Write([]byte(s))
+			if verbose {
+				log.Printf("<- %s", s)
+			}
+}
+
 func handleConnection(c net.Conn, latency time.Duration, verbose bool) {
 	// Print banner
-	c.Write([]byte("220 Welcome to Blackhole SMTP!\r\n"))
+	sendResponse(c, "220 Welcome to Blackhole SMTP!\r\n", verbose)
 	for {
-		readBuf := make([]byte, 1024)
+		readBuf := make([]byte, 4096)
 		l, e := c.Read(readBuf)
 		if e != nil {
 			_ = c.Close()
@@ -41,20 +50,17 @@ func handleConnection(c net.Conn, latency time.Duration, verbose bool) {
 		}
 		h, ok := responses[string(readBuf[0:4])]
 		if ok {
-			c.Write([]byte(h.s))
+			sendResponse(c, h.s, verbose)
 			if h.f != nil {
-				h.f(c, readBuf, latency)
-			}
-			if verbose {
-				log.Printf("<- %s", h.s)
+				h.f(c, readBuf, latency, verbose)
 			}
 		} else {
-			c.Write([]byte("500 Command unrecognized\r\n"))
+			sendResponse(c, "500 Command unrecognized\r\n", verbose)
 		}
 	}
 }
 
-func handleData(c net.Conn, b []byte, latency time.Duration) {
+func handleData(c net.Conn, b []byte, latency time.Duration, verbose bool) {
 	for {
 		l, e := c.Read(b)
 		if e != nil || l == 0 {
@@ -62,13 +68,13 @@ func handleData(c net.Conn, b []byte, latency time.Duration) {
 		}
 		if bytes.Contains(b, []byte("\r\n.\r\n")) {
 			time.Sleep(latency * time.Millisecond)
-			c.Write([]byte("250 OK\r\n"))
+			sendResponse(c, "250 OK\r\n", verbose)
 			break
 		}
 	}
 }
 
-func handleBdat(c net.Conn, b []byte, latency time.Duration) {
+func handleBdat(c net.Conn, b []byte, latency time.Duration, verbose bool) {
 }
 
 func main() {
