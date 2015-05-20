@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -10,83 +11,131 @@ import (
 	"time"
 )
 
-type handler struct {
-	s string
-	f func(net.Conn, []byte, time.Duration, bool)
+type config struct {
+	latency time.Duration
+	verbose bool
+	tls     tls.Config
 }
 
-var verbose bool
+type handler struct {
+	s string
+	f func(*net.Conn, []byte, *config)
+}
 
 var responses = map[string]handler{
-	"EHLO": {"250-Pleased to meet you!\r\n250-PIPELINING\r\n250 CHUNKING\r\n", nil},
-	"HELO": {"250 Pleased to meet you!\r\n", nil},
-	"MAIL": {"250 OK\r\n", nil},
-	"RCPT": {"250 OK\r\n", nil},
-	"DATA": {"354 End data with <CR><LF>.<CR><LF>\r\n", handleData}, // Need to read data until \r\n.\r\n is received.
-	"BDAT": {"250 OK\r\n", handleBdat},                              // Should be sent once the data has been reveived
-	"RSET": {"250 OK\r\n", nil},
-	"QUIT": {"221 Goodbye\r\n", nil}}
+	"EHLO":           {"250-Pleased to meet you!\r\n250-PIPELINING\r\n250 CHUNKING\r\n250 STARTTLS\r\n", nil},
+	"HELO":           {"250 Pleased to meet you!\r\n", nil},
+	"STAR" /*TTLS*/ : {"220 Ready to start TLS\r\n", handleStarttls},
+	"MAIL":           {"250 OK\r\n", nil},
+	"RCPT":           {"250 OK\r\n", nil},
+	"DATA":           {"354 End data with <CR><LF>.<CR><LF>\r\n", handleData}, // Need to read data until \r\n.\r\n is received.
+	"BDAT":           {"250 OK\r\n", handleBdat},                              // Should be sent once the data has been reveived
+	"RSET":           {"250 OK\r\n", nil},
+	"QUIT":           {"221 Goodbye\r\n", nil},
+}
 
-func sendResponse(c net.Conn, s string, verbose bool) {
-	c.Write([]byte(s))
+func sendResponse(c *net.Conn, s string, verbose bool) {
+	(*c).Write([]byte(s))
 	if verbose {
 		log.Printf("<- %s", s)
 	}
 }
 
-func handleConnection(c net.Conn, latency time.Duration, verbose bool) {
+func handleConnection(c *net.Conn, conf *config) {
 	// Print banner
-	sendResponse(c, "220 Welcome to Blackhole SMTP!\r\n", verbose)
+	sendResponse(c, "220 Welcome to Blackhole SMTP!\r\n", conf.verbose)
+
+	// Handle commands
 	for {
+		// Read command
 		readBuf := make([]byte, 4096)
-		l, e := c.Read(readBuf)
+		l, e := (*c).Read(readBuf)
 		if e != nil {
-			_ = c.Close()
+			_ = (*c).Close()
 			return
 		}
-		time.Sleep(latency * time.Millisecond)
-		if verbose {
+
+		// Log command
+		if conf.verbose {
 			log.Printf("-> [%s]", strings.Trim(string(readBuf[0:l]), "\r\n "))
 		}
+
+		// Add latency
+		if conf.latency != 0 {
+			time.Sleep(conf.latency * time.Millisecond)
+		}
+
+		// Send response
 		h, ok := responses[string(readBuf[0:4])]
 		if ok {
-			sendResponse(c, h.s, verbose)
+			sendResponse(c, h.s, conf.verbose)
 			if h.f != nil {
-				h.f(c, readBuf, latency, verbose)
+				// Run callback to handle transaction
+				h.f(c, readBuf, conf)
 			}
 		} else {
-			sendResponse(c, "500 Command unrecognized\r\n", verbose)
+			sendResponse(c, "500 Command unrecognized\r\n", conf.verbose)
 		}
 	}
 }
 
-func handleData(c net.Conn, b []byte, latency time.Duration, verbose bool) {
+func handleData(c *net.Conn, b []byte, conf *config) {
 	for {
-		l, e := c.Read(b)
+		l, e := (*c).Read(b)
 		if e != nil || l == 0 {
 			break
 		}
 		if bytes.Contains(b, []byte("\r\n.\r\n")) {
-			time.Sleep(latency * time.Millisecond)
-			sendResponse(c, "250 OK\r\n", verbose)
+			if conf.latency != 0 {
+				time.Sleep(conf.latency)
+			}
+			sendResponse(c, "250 OK\r\n", conf.verbose)
 			break
 		}
 	}
 }
 
-func handleBdat(c net.Conn, b []byte, latency time.Duration, verbose bool) {
+func handleBdat(c *net.Conn, b []byte, conf *config) {
+	// TODO Implement BDAT
+}
+
+func handleStarttls(c *net.Conn, b []byte, conf *config) {
+	*c = tls.Server(*c, &conf.tls)
 }
 
 func main() {
-	var port int
-	var latency int
-	var verbose bool
+	var conf config
+	var port, latency int
+	var certFile, keyFile string
 
 	flag.IntVar(&port, "port", 25, "TCP port")
 	flag.IntVar(&latency, "latency", 0, "Latency in milliseconds")
-	flag.BoolVar(&verbose, "verbose", false, "Show the SMTP traffic")
+	flag.BoolVar(&conf.verbose, "verbose", false, "Show the SMTP traffic")
+	flag.StringVar(&certFile, "cert", "", "Certficate file (PEM encoded)")
+	flag.StringVar(&keyFile, "key", "", "Private key file (PEM encoded)")
 
 	flag.Parse()
+
+	// Set latency
+	if latency < 0 || 1000000 < latency {
+		latency = 0
+	}
+	conf.latency = time.Duration(latency) * time.Millisecond
+
+	if certFile != "" {
+		// Load certificate
+		if keyFile == "" {
+			// Assume the private key is in the same file as the certificate
+			keyFile = certFile
+		}
+		cert, e := tls.LoadX509KeyPair(certFile, keyFile)
+		if e != nil {
+			// Error!
+			log.Panic(e)
+			return
+		}
+		conf.tls.Certificates = []tls.Certificate{cert}
+	}
 
 	// Get address:port
 	a, e := net.ResolveTCPAddr("tcp4", fmt.Sprintf(":%d", port))
@@ -110,6 +159,6 @@ func main() {
 		if e != nil {
 			continue
 		}
-		go handleConnection(c, time.Duration(latency), verbose)
+		go handleConnection(&c, &conf)
 	}
 }
