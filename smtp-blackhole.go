@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -105,16 +106,20 @@ func handleStarttls(c *net.Conn, b []byte, conf *config) {
 
 func main() {
 	var conf config
-	var port, latency int
+	var port, latency, cpus int
 	var certFile, keyFile string
 
-	flag.IntVar(&port, "port", 25, "TCP port")
-	flag.IntVar(&latency, "latency", 0, "Latency in milliseconds")
-	flag.BoolVar(&conf.verbose, "verbose", false, "Show the SMTP traffic")
 	flag.StringVar(&certFile, "cert", "", "Certficate file (PEM encoded)")
+	flag.IntVar(&cpus, "cpus", 2, "Number of CPUs/kernel threads used")
 	flag.StringVar(&keyFile, "key", "", "Private key file (PEM encoded)")
+	flag.IntVar(&latency, "latency", 0, "Latency in milliseconds")
+	flag.IntVar(&port, "port", 25, "TCP port")
+	flag.BoolVar(&conf.verbose, "verbose", false, "Show the SMTP traffic")
 
 	flag.Parse()
+
+	// Use cpus kernel threads
+	runtime.GOMAXPROCS(cpus)
 
 	// Set latency
 	if latency < 0 || 1000000 < latency {
