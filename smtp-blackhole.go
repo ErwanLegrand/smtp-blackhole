@@ -24,7 +24,8 @@ type handler struct {
 }
 
 var responses = map[string]handler{
-	"EHLO":           {"250-Pleased to meet you!\r\n250-PIPELINING\r\n250 CHUNKING\r\n250 STARTTLS\r\n", nil},
+	"EHLO":           {"250-Pleased to meet you!\r\n250-PIPELINING\r\n250-CHUNKING\r\n250-STARTTLS\r\n250 OK\r\n", nil},
+	"LHLO":           {"250-Pleased to meet you!\r\n250-PIPELINING\r\n250-CHUNKING\r\n250-STARTTLS\r\n250 OK\r\n", nil},
 	"HELO":           {"250 Pleased to meet you!\r\n", nil},
 	"STAR" /*TTLS*/ : {"220 Ready to start TLS\r\n", handleStarttls},
 	"MAIL":           {"250 OK\r\n", nil},
@@ -38,7 +39,12 @@ var responses = map[string]handler{
 func sendResponse(c *net.Conn, s string, verbose bool) {
 	(*c).Write([]byte(s))
 	if verbose {
-		log.Printf("<- %s", s)
+		strs := strings.Split(s, "\r\n")
+		for _, str := range strs {
+			if len(str) != 0 {
+				log.Printf("<- [%s]", str)
+			}
+		}
 	}
 }
 
@@ -67,7 +73,7 @@ func handleConnection(c *net.Conn, conf *config) {
 		}
 
 		// Send response
-		h, ok := responses[string(readBuf[0:4])]
+		h, ok := responses[strings.ToUpper(string(readBuf[0:4]))]
 		if ok {
 			sendResponse(c, h.s, conf.verbose)
 			if h.f != nil {
@@ -82,14 +88,25 @@ func handleConnection(c *net.Conn, conf *config) {
 
 func handleData(c *net.Conn, b []byte, conf *config) {
 	for {
+		// Read data
 		l, e := (*c).Read(b)
 		if e != nil || l == 0 {
 			break
 		}
+
+		// Log number of bytes received
+		if conf.verbose {
+			log.Printf("-- Received %d bytes", l)
+		}
+
+		// Check wether we have reached the end
 		if bytes.Contains(b, []byte("\r\n.\r\n")) {
+			// Add latency
 			if conf.latency != 0 {
 				time.Sleep(conf.latency)
 			}
+
+			// Send response
 			sendResponse(c, "250 OK\r\n", conf.verbose)
 			break
 		}
